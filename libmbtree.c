@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include "libmbtree.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +11,37 @@ typedef struct __mbtree_t{
   int size;
 } _mbtree_t;
 
-mbtree_t mbtree_new(char *key, void *data, int data_size) {
+
+mbtree_t mbtree_new() {
+  _mbtree_t *t = calloc(sizeof(_mbtree_t), 1);
+  return t;
+}
+
+int mbtree_set_key(mbtree_t h, char *key) {
+  _mbtree_t* ht = (_mbtree_t*)h;
+
+  if (ht) {
+    ht->key = strdup(key);
+    if (ht->key) {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
+int mbtree_set_data(mbtree_t h, void *data) {
+  _mbtree_t* ht = (_mbtree_t*)h;
+
+  if (ht) {
+    ht->data = data;
+    return 0;
+  }
+
+  return 1;
+}
+
+mbtree_t mbtree_new_(char *key, void *data) {
   _mbtree_t *t = calloc(sizeof(_mbtree_t), 1);
   if (!t)
     goto err;
@@ -20,20 +51,13 @@ mbtree_t mbtree_new(char *key, void *data, int data_size) {
   if (!t->key)
     goto err;
 
-  t->data = malloc(data_size);
-
-  if (!t->data)
-    goto err;
-
+  t->data = data;
   t->childs = NULL;
-  memcpy(t->data, data, data_size);
   return (mbtree_t)t;
 err:
   if (t) {
     if (t->key)
       free(t->key);
-    if (t->data)
-      free(t->data);
     if (t->childs)
       free(t->childs);
   }
@@ -60,7 +84,23 @@ int mbtree_append(mbtree_t h, mbtree_t c) {
   return 0;
 }
 
-void mbtree_free(mbtree_t *h) {
+void mbtree_iterate(mbtree_t *h, void (*f)(void*)) {
+  _mbtree_t* ht = (_mbtree_t*)*h;
+
+  if (!h) {
+    return;
+  }
+
+  for(int i = 0; i < ht->size; i++) {
+    if (ht->childs[i]) {
+      f(ht->childs[i]);
+      mbtree_iterate((void**)&ht->childs[i], f);
+    }
+  }
+
+}
+
+void mbtree_free(mbtree_t *h, void (*free_function)(void**)) {
   _mbtree_t* ht = (_mbtree_t*)*h;
 
   if (!h) {
@@ -69,7 +109,7 @@ void mbtree_free(mbtree_t *h) {
 
   for(int i = 0; i < ht->size; i++) {
     if (ht->childs[i])
-      mbtree_free((void**)&ht->childs[i]);
+      mbtree_free((void**)&ht->childs[i], free_function);
   }
 
   if (ht->childs) {
@@ -83,7 +123,7 @@ void mbtree_free(mbtree_t *h) {
   }
 
   if (ht->data) {
-    free(ht->data);
+    free_function(&ht->data);
     ht->data = NULL;
   }
 
@@ -93,9 +133,10 @@ void mbtree_free(mbtree_t *h) {
   }
 }
 
-void* mbtree_get(mbtree_t h, const char *path) {
+mbtree_t mbtree_get(mbtree_t h, const char *path) {
   const char *ptr = strchr(path, '.');
   _mbtree_t* ht = (_mbtree_t*)h;
+  char *buf = NULL;
 
   if (!h || !path) {
     return NULL;
@@ -103,27 +144,32 @@ void* mbtree_get(mbtree_t h, const char *path) {
 
   if (!ptr) {
     for(int i = 0; i < ht->size; i++) {
-      if (!strcmp(ht->childs[i]->key, path)) {
+      if (!strncmp(ht->childs[i]->key, path, strlen(ht->childs[i]->key))) {
         return ht->childs[i];
       }
     }
     return NULL;
   }
 
-  char buf[ptr - path];
-  strncpy(buf, path, ptr-path);
+  asprintf(&buf, "%s", path);
+
+  if (!buf) {
+    return NULL;
+  }
 
   for(int i = 0; i < ht->size; i++) {
-    if (!strcmp(ht->childs[i]->key, buf)) {
+    if (!strncmp(ht->childs[i]->key, buf, strlen(ht->childs[i]->key))) {
+      free(buf);
       return mbtree_get(ht->childs[i], ptr+1);
     }
   }
 
+  free(buf);
   return NULL;
 }
 
 void* mbtree_get_data(mbtree_t h) {
-  _mbtree_t* ht = (_mbtree_t*)NULL;
+  _mbtree_t* ht = (_mbtree_t*)h;
   if (ht)
     return ht->data;
   return NULL;
